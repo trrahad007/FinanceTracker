@@ -31,49 +31,81 @@ button{cursor:pointer;}
 <script type="text/babel">
 const{useState,useEffect,useRef,useMemo}=React;
 
-// ═══ STORAGE ════════════════════════════════════════════════
-const SK='ft_tazwaar_v1';
+// ═══════════════════════════════════════════════════════════════
+//  USERS — Rahad = admin/editor, Shammi = view-only
+// ═══════════════════════════════════════════════════════════════
+const USERS={
+  Rahad:   {password:'1234', role:'admin'},
+  Shammi:  {password:'1234', role:'viewer'},
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  STORAGE
+// ═══════════════════════════════════════════════════════════════
+const SK='ft_tazwaar_v2';
 function load(){try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch{return null;}}
 function save(s){try{localStorage.setItem(SK,JSON.stringify(s));}catch{}}
 
-// ═══ AGREEMENT ══════════════════════════════════════════════
-const AGR={principal:400000,interest:14000,deadline:15,lender:'Rahad',borrower:'Shammi'};
+// ═══════════════════════════════════════════════════════════════
+//  AGREEMENT CONFIG
+// ═══════════════════════════════════════════════════════════════
+const AGR={principal:400000,interest:14000,deadline:15};
 
 function genSchedule(){
   const rows=[];let y=2026,m=8,id=1;
   while(y<2028||(y===2028&&m<=8)){
     const due=new Date(y,m,AGR.deadline);
-    rows.push({id:`p${id++}`,year:y,month:m,dueDate:due.toISOString().slice(0,10),expectedAmount:AGR.interest,submission:null});
+    rows.push({id:`p${id++}`,year:y,month:m,
+      dueDate:due.toISOString().slice(0,10),
+      expectedAmount:AGR.interest,
+      payment:null  // {paymentDate, paidAmount, note, proof, recordedAt}
+    });
     m++;if(m>11){m=0;y++;}
   }
   return rows;
 }
 
 const DEFAULT_BANK={
-  accountName:'Tazwaar',bankName:'Dutch-Bangla Bank Limited',
-  accountNumber:'1234567890',branchName:'Gulshan Branch',
-  routingNumber:'090261234',mobileNumber:'01712-345678',
+  accountName:'Tazwaar',
+  bankName:'Dutch-Bangla Bank Limited',
+  accountNumber:'1234567890',
+  branchName:'Gulshan Branch',
+  routingNumber:'090261234',
+  mobileNumber:'01712-345678',
   note:'Please mention your name and payment month in the transfer description.',
 };
 
 function initState(){
   const s=load();
-  if(s&&s.payments&&s.payments.length>0)return s;
+  // Migrate old format if needed
+  if(s&&s.payments&&s.payments.length>0){
+    const migrated=s.payments.map(p=>{
+      if(p.payment!==undefined)return p; // already new format
+      // old format had p.submission
+      const sub=p.submission;
+      if(sub&&sub.status==='approved'){
+        return{...p,payment:{paymentDate:sub.paymentDate,paidAmount:sub.paidAmount,note:sub.note||'',proof:sub.proof||null,recordedAt:sub.confirmedAt||sub.submittedAt},submission:undefined};
+      }
+      return{...p,payment:null,submission:undefined};
+    });
+    return{payments:migrated,bank:s.bank||DEFAULT_BANK};
+  }
   return{payments:genSchedule(),bank:DEFAULT_BANK};
 }
 
-// ═══ HELPERS ════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════════
 function fmtDate(d){if(!d)return'—';return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});}
 function fmtTaka(n){return'৳'+Number(n).toLocaleString('en-IN');}
 function monthLabel(y,m){return new Date(y,m,1).toLocaleDateString('en-GB',{month:'long',year:'numeric'});}
 function todayStr(){return new Date().toISOString().slice(0,10);}
 
 function computeStatus(p){
-  const now=new Date();const due=new Date(p.dueDate);
-  if(p.submission){
-    if(p.submission.status==='rejected')return'Rejected';
-    if(p.submission.status==='approved')return new Date(p.submission.paymentDate)<=due?'Received in time':'Received late';
-    return'Awaiting Confirmation';
+  const now=new Date();
+  const due=new Date(p.dueDate);
+  if(p.payment){
+    return new Date(p.payment.paymentDate)<=due?'Received in time':'Received late';
   }
   if(now>new Date(p.year,p.month+1,0))return'Missed';
   return'Pending';
@@ -82,46 +114,50 @@ function computeStatus(p){
 function countdownInfo(dueDateStr){
   const now=new Date();now.setHours(0,0,0,0);
   const due=new Date(dueDateStr);due.setHours(0,0,0,0);
-  const diff=Math.round((due-now)/(86400000));
+  const diff=Math.round((due-now)/86400000);
   if(diff<0)return{text:`${Math.abs(diff)} days overdue`,color:'#dc2626',urgent:true};
   if(diff===0)return{text:'Due today',color:'#c2410c',urgent:true};
   if(diff<=5)return{text:`${diff} days remaining`,color:'#ea580c',urgent:true};
   return{text:`${diff} days remaining`,color:'#15803d',urgent:false};
 }
 
-// ═══ ICONS ══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  ICONS
+// ═══════════════════════════════════════════════════════════════
 const I={
   grid:<svg width="16"height="16"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><rect x="3"y="3"width="7"height="7"rx="1"/><rect x="14"y="3"width="7"height="7"rx="1"/><rect x="3"y="14"width="7"height="7"rx="1"/><rect x="14"y="14"width="7"height="7"rx="1"/></svg>,
   card:<svg width="16"height="16"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><rect x="2"y="5"width="20"height="14"rx="2"/><path d="M2 10h20"/></svg>,
   clock:<svg width="16"height="16"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><circle cx="12"cy="12"r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
-  inbox:<svg width="16"height="16"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>,
   doc:<svg width="16"height="16"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16"y1="13"x2="8"y2="13"/><line x1="16"y1="17"x2="8"y2="17"/></svg>,
   bank:<svg width="16"height="16"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v3M12 14v3M16 14v3"/></svg>,
   edit:<svg width="14"height="14"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+  trash:<svg width="14"height="14"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>,
   eye:<svg width="14"height="14"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12"cy="12"r="3"/></svg>,
-  chk:<svg width="14"height="14"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>,
   x:<svg width="14"height="14"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2.5"><line x1="18"y1="6"x2="6"y2="18"/><line x1="6"y1="6"x2="18"y2="18"/></svg>,
-  bell:<svg width="16"height="16"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>,
   up:<svg width="20"height="20"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><polyline points="16 16 12 12 8 16"/><line x1="12"y1="12"x2="12"y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>,
-  send:<svg width="16"height="16"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><line x1="22"y1="2"x2="11"y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
+  save:<svg width="16"height="16"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
   menu:<svg width="20"height="20"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><line x1="3"y1="12"x2="21"y2="12"/><line x1="3"y1="6"x2="21"y2="6"/><line x1="3"y1="18"x2="21"y2="18"/></svg>,
+  logout:<svg width="16"height="16"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21"y1="12"x2="9"y2="12"/></svg>,
+  lock:<svg width="13"height="13"fill="none"viewBox="0 0 24 24"stroke="currentColor"strokeWidth="2"><rect x="3"y="11"width="18"height="11"rx="2"ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>,
 };
 
-// ═══ BADGE ══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  STATUS BADGE
+// ═══════════════════════════════════════════════════════════════
 function Badge({s}){
   const M={
     'Pending':{bg:'#fef9c3',co:'#854d0e',bo:'#fde68a'},
-    'Awaiting Confirmation':{bg:'#eff6ff',co:'#1d4ed8',bo:'#bfdbfe'},
     'Received in time':{bg:'#f0fdf4',co:'#15803d',bo:'#86efac'},
     'Received late':{bg:'#fff7ed',co:'#c2410c',bo:'#fed7aa'},
     'Missed':{bg:'#fef2f2',co:'#dc2626',bo:'#fecaca'},
-    'Rejected':{bg:'#fdf2f8',co:'#9d174d',bo:'#f9a8d4'},
   };
   const c=M[s]||{bg:'#f1f5f9',co:'#475569',bo:'#e2e8f0'};
   return<span style={{background:c.bg,color:c.co,border:`1px solid ${c.bo}`,borderRadius:6,padding:'3px 9px',fontSize:11,fontWeight:600,whiteSpace:'nowrap'}}>{s}</span>;
 }
 
-// ═══ STAT ════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  STAT CARD
+// ═══════════════════════════════════════════════════════════════
 function Stat({label,value,sub,accent}){
   return(
     <div style={{background:'#fff',borderRadius:12,padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.06)',border:'1px solid #e8edf5',flex:1,minWidth:128}}>
@@ -132,7 +168,9 @@ function Stat({label,value,sub,accent}){
   );
 }
 
-// ═══ PROOF ══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  PROOF COMPONENTS
+// ═══════════════════════════════════════════════════════════════
 function ProofThumb({proof}){
   if(!proof)return null;
   if(proof.type&&proof.type.startsWith('image/'))
@@ -142,7 +180,7 @@ function ProofThumb({proof}){
 
 function ProofModal({proof,onClose}){
   return(
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.65)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
       <div style={{background:'#fff',borderRadius:16,padding:22,maxWidth:580,width:'100%',maxHeight:'90vh',overflow:'auto'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
           <h3 style={{margin:0,fontSize:16,fontWeight:700,color:'#0f172a'}}>Payment Proof</h3>
@@ -161,11 +199,14 @@ function ProofModal({proof,onClose}){
   );
 }
 
-// ═══ LAYOUT ═════════════════════════════════════════════════
-function Layout({nav,active,setActive,badge,children}){
+// ═══════════════════════════════════════════════════════════════
+//  LAYOUT
+// ═══════════════════════════════════════════════════════════════
+function Layout({nav,active,setActive,user,onLogout,children}){
   const[mob,setMob]=useState(false);
   return(
     <div style={{display:'flex',minHeight:'100vh'}}>
+      {/* SIDEBAR */}
       <div className="sidebar" style={{left:mob?0:undefined}}>
         <div style={{padding:'20px 16px 14px',borderBottom:'1px solid #1f2a3c',flexShrink:0}}>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
@@ -184,24 +225,32 @@ function Layout({nav,active,setActive,badge,children}){
                 color:active===item.id?'#fff':'#7a8fa8',
                 fontSize:13,fontWeight:active===item.id?600:400,marginBottom:2,textAlign:'left'}}>
               {item.icon}{item.label}
-              {item.badge>0&&<span style={{marginLeft:'auto',background:'#ef4444',color:'#fff',borderRadius:10,padding:'1px 7px',fontSize:10,fontWeight:700}}>{item.badge}</span>}
             </button>
           ))}
         </nav>
+        <button onClick={onLogout} style={{display:'flex',alignItems:'center',gap:8,margin:'0 10px 14px',padding:'9px 10px',borderRadius:8,border:'none',background:'transparent',color:'#4b5e7a',fontSize:13,textAlign:'left'}}>
+          {I.logout} Logout
+        </button>
       </div>
+
       {mob&&<div onClick={()=>setMob(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.45)',zIndex:199}}/>}
+
+      {/* MAIN */}
       <div className="main">
-        <style>{`@media(min-width:768px){.sidebar{left:0!important;}.main{margin-left:224px!important;}.mob-btn{display:none!important;}}@media(max-width:767px){.mob-btn{display:flex!important;}}`}</style>
         <div style={{background:'#fff',borderBottom:'1px solid #e8edf5',padding:'11px 20px',display:'flex',alignItems:'center',gap:12,position:'sticky',top:0,zIndex:50}}>
           <button className="mob-btn" onClick={()=>setMob(!mob)} style={{border:'none',background:'transparent',color:'#374151',padding:4,display:'none',alignItems:'center'}}>{I.menu}</button>
           <div style={{flex:1,fontWeight:700,color:'#0f172a',fontSize:14}}>{nav.find(n=>n.id===active)?.label||''}</div>
-          {badge>0&&(
-            <div style={{position:'relative',cursor:'pointer'}} onClick={()=>setActive('requests')}>
-              <span style={{color:'#64748b'}}>{I.bell}</span>
-              <span style={{position:'absolute',top:-6,right:-6,background:'#ef4444',color:'#fff',borderRadius:'50%',width:15,height:15,display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:700}}>{badge}</span>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            {user.role==='viewer'&&(
+              <div style={{display:'flex',alignItems:'center',gap:5,background:'#f1f5f9',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#64748b',fontWeight:600}}>
+                {I.lock} View Only
+              </div>
+            )}
+            <div style={{display:'flex',alignItems:'center',gap:7,background:'#f8faff',borderRadius:8,padding:'5px 12px',border:'1px solid #e8edf5'}}>
+              <div style={{width:26,height:26,background:'#2563eb',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:800,fontSize:11}}>{user.username[0]}</div>
+              <span style={{fontSize:13,fontWeight:600,color:'#374151'}}>{user.username}</span>
             </div>
-          )}
-          <div style={{width:30,height:30,background:'#2563eb',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:800,fontSize:12}}>T</div>
+          </div>
         </div>
         <div style={{flex:1,padding:'22px 20px',maxWidth:1100,width:'100%',margin:'0 auto'}}>
           {children}
@@ -211,63 +260,117 @@ function Layout({nav,active,setActive,badge,children}){
   );
 }
 
-// ═══ APP ROOT ════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  LOGIN
+// ═══════════════════════════════════════════════════════════════
+function Login({onLogin}){
+  const[u,setU]=useState('');const[p,setP]=useState('');const[err,setErr]=useState('');
+  const go=()=>{
+    const usr=USERS[u];
+    if(!usr||usr.password!==p){setErr('Invalid username or password.');return;}
+    onLogin({username:u,role:usr.role});
+  };
+  return(
+    <div style={{minHeight:'100vh',background:'#f0f4fb',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{background:'#fff',borderRadius:16,boxShadow:'0 4px 32px rgba(37,99,235,.12)',padding:'44px 36px',width:360,maxWidth:'100%'}}>
+        <div style={{textAlign:'center',marginBottom:28}}>
+          <div style={{width:50,height:50,background:'#2563eb',borderRadius:14,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 14px',color:'#fff',fontSize:22,fontWeight:900}}>৳</div>
+          <h1 style={{fontSize:21,fontWeight:800,color:'#0f172a'}}>Finance Tracker</h1>
+          <p style={{color:'#64748b',fontSize:12,marginTop:5}}>Rahad & Shammi — Personal Agreement</p>
+        </div>
+        {err&&<div style={{background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:8,padding:'9px 14px',fontSize:13,marginBottom:16}}>{err}</div>}
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:12,fontWeight:700,color:'#374151',display:'block',marginBottom:5}}>Username</label>
+          <input value={u} onChange={e=>{setU(e.target.value);setErr('');}} onKeyDown={e=>e.key==='Enter'&&go()} placeholder="Rahad or Shammi"
+            style={{width:'100%',border:'1.5px solid #e2e8f0',borderRadius:8,padding:'10px 12px',fontSize:14,outline:'none',color:'#0f172a'}}/>
+        </div>
+        <div style={{marginBottom:22}}>
+          <label style={{fontSize:12,fontWeight:700,color:'#374151',display:'block',marginBottom:5}}>Password</label>
+          <input type="password" value={p} onChange={e=>{setP(e.target.value);setErr('');}} onKeyDown={e=>e.key==='Enter'&&go()} placeholder="••••"
+            style={{width:'100%',border:'1.5px solid #e2e8f0',borderRadius:8,padding:'10px 12px',fontSize:14,outline:'none',color:'#0f172a'}}/>
+        </div>
+        <button onClick={go} style={{width:'100%',background:'#2563eb',color:'#fff',border:'none',borderRadius:8,padding:12,fontSize:15,fontWeight:700}}>Sign In</button>
+        <p style={{textAlign:'center',color:'#94a3b8',fontSize:11,marginTop:18}}>Use credentials shared by Rahad (Tazwaar)</p>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  APP ROOT
+// ═══════════════════════════════════════════════════════════════
 function App(){
+  const[user,setUser]=useState(null);
   const[state,setState]=useState(initState);
   const[sec,setSec]=useState('dashboard');
-  const[selPay,setSelPay]=useState(null);
   const[proofModal,setProofModal]=useState(null);
+
+  // Poll localStorage every 3s so viewer sees Rahad's changes
+  useEffect(()=>{
+    const id=setInterval(()=>{
+      const fresh=load();
+      if(fresh&&JSON.stringify(fresh)!==JSON.stringify(state)){
+        setState(fresh);
+      }
+    },3000);
+    return()=>clearInterval(id);
+  },[state]);
 
   useEffect(()=>{save(state);},[state]);
 
   const updPayment=(id,fn)=>setState(prev=>({...prev,payments:prev.payments.map(p=>p.id===id?fn(p):p)}));
-  const updBank=(bank)=>setState(prev=>({...prev,bank}));
+  const updBank=bank=>setState(prev=>({...prev,bank}));
 
   const rows=useMemo(()=>state.payments.map(p=>({...p,cs:computeStatus(p)})),[state.payments]);
-  const awaiting=useMemo(()=>rows.filter(p=>p.submission&&p.submission.status==='pending').length,[rows]);
-  const approved=useMemo(()=>rows.filter(p=>p.submission&&p.submission.status==='approved'),[rows]);
-  const totRec=useMemo(()=>approved.reduce((s,p)=>s+(p.submission?.paidAmount||0),0),[approved]);
+  const paid=useMemo(()=>rows.filter(p=>p.payment),[rows]);
+  const totRec=useMemo(()=>paid.reduce((s,p)=>s+(p.payment.paidAmount||0),0),[paid]);
   const totExp=rows.length*AGR.interest;
 
-  const nav=[
-    {id:'dashboard',label:'Dashboard',icon:I.grid,badge:0},
-    {id:'payments',label:'Monthly Payments',icon:I.card,badge:0},
-    {id:'requests',label:'Payment Requests',icon:I.inbox,badge:awaiting},
-    {id:'history',label:'Payment History',icon:I.clock,badge:0},
-    {id:'submit',label:'Record Payment',icon:I.send,badge:0},
-    {id:'agreement',label:'Agreement Details',icon:I.doc,badge:0},
-    {id:'bank',label:'Bank Details',icon:I.bank,badge:0},
-  ];
+  if(!user)return<Login onLogin={u=>{setUser(u);setSec('dashboard');}}/>;
 
-  const approvePayment=(id,ok)=>{
-    updPayment(id,p=>({...p,submission:{...p.submission,status:ok?'approved':'rejected',confirmedAt:new Date().toISOString(),confirmedBy:'Tazwaar'}}));
-    setSelPay(null);
-  };
+  const isAdmin=user.role==='admin';
+
+  const adminNav=[
+    {id:'dashboard',label:'Dashboard',icon:I.grid},
+    {id:'payments',label:'Monthly Payments',icon:I.card},
+    {id:'history',label:'Payment History',icon:I.clock},
+    {id:'record',label:'Record Payment',icon:I.save},
+    {id:'agreement',label:'Agreement Details',icon:I.doc},
+    {id:'bank',label:'Bank Details',icon:I.bank},
+  ];
+  const viewerNav=[
+    {id:'dashboard',label:'Dashboard',icon:I.grid},
+    {id:'payments',label:'Monthly Payments',icon:I.card},
+    {id:'history',label:'Payment History',icon:I.clock},
+    {id:'agreement',label:'Agreement Details',icon:I.doc},
+    {id:'bank',label:'Bank Details',icon:I.bank},
+  ];
+  const nav=isAdmin?adminNav:viewerNav;
 
   return(
-    <Layout nav={nav} active={sec} setActive={setSec} badge={awaiting}>
-      {sec==='dashboard'&&<Dashboard rows={rows} totRec={totRec} totExp={totExp} approved={approved} awaiting={awaiting} setSec={setSec} setSelPay={setSelPay}/>}
-      {sec==='payments'&&<MonthTable rows={rows} onReview={p=>{setSelPay(p);setSec('requests');}} onProof={setProofModal}/>}
-      {sec==='requests'&&<Requests rows={rows} sel={selPay} onSel={setSelPay} onApprove={approvePayment} onProof={setProofModal}/>}
+    <Layout nav={nav} active={sec} setActive={setSec} user={user} onLogout={()=>{setUser(null);setSec('dashboard');}}>
+      {sec==='dashboard'&&<Dashboard rows={rows} totRec={totRec} totExp={totExp} paid={paid} isAdmin={isAdmin} setSec={setSec}/>}
+      {sec==='payments'&&<MonthTable rows={rows} isAdmin={isAdmin} updPayment={updPayment} onProof={setProofModal} setSec={setSec}/>}
       {sec==='history'&&<History rows={rows} onProof={setProofModal}/>}
-      {sec==='submit'&&<RecordPayment rows={rows} updPayment={updPayment} setSec={setSec}/>}
+      {sec==='record'&&isAdmin&&<RecordPayment rows={rows} updPayment={updPayment} setSec={setSec}/>}
       {sec==='agreement'&&<AgrDetail totalMonths={rows.length}/>}
-      {sec==='bank'&&<BankSection bank={state.bank} onSave={updBank}/>}
+      {sec==='bank'&&<BankSection bank={state.bank} isAdmin={isAdmin} onSave={updBank}/>}
       {proofModal&&<ProofModal proof={proofModal} onClose={()=>setProofModal(null)}/>}
     </Layout>
   );
 }
 
-// ═══ DASHBOARD ══════════════════════════════════════════════
-function Dashboard({rows,totRec,totExp,approved,awaiting,setSec,setSelPay}){
+// ═══════════════════════════════════════════════════════════════
+//  DASHBOARD
+// ═══════════════════════════════════════════════════════════════
+function Dashboard({rows,totRec,totExp,paid,isAdmin,setSec}){
   const now=new Date();
   const lateCount=rows.filter(p=>p.cs==='Received late').length;
   const missedCount=rows.filter(p=>p.cs==='Missed').length;
-  const remaining=rows.filter(p=>p.cs==='Pending'||p.cs==='Awaiting Confirmation').length;
+  const remaining=rows.filter(p=>p.cs==='Pending').length;
   const totPend=totExp-totRec;
-  const nextDue=rows.find(p=>p.cs==='Pending'||p.cs==='Awaiting Confirmation');
+  const nextDue=rows.find(p=>p.cs==='Pending');
   const countdown=nextDue?countdownInfo(nextDue.dueDate):null;
-  const curMonth=rows.find(p=>p.year===now.getFullYear()&&p.month===now.getMonth());
 
   return(
     <div>
@@ -276,7 +379,7 @@ function Dashboard({rows,totRec,totExp,approved,awaiting,setSec,setSelPay}){
         <p style={{color:'#64748b',fontSize:13}}>Rahad → Shammi interest agreement overview</p>
       </div>
 
-      {/* NEXT PAYMENT HERO CARD */}
+      {/* HERO CARD */}
       {nextDue&&(
         <div style={{
           background:countdown.urgent
@@ -294,20 +397,11 @@ function Dashboard({rows,totRec,totExp,approved,awaiting,setSec,setSelPay}){
               <div style={{fontSize:28,fontWeight:900,marginBottom:6,lineHeight:1.1}}>{monthLabel(nextDue.year,nextDue.month)}</div>
               <div style={{fontSize:14,opacity:.85}}>Due date: <strong>{fmtDate(nextDue.dueDate)}</strong></div>
               <div style={{fontSize:14,opacity:.85,marginTop:3}}>Amount: <strong>{fmtTaka(nextDue.expectedAmount)}</strong></div>
-              {nextDue.cs==='Awaiting Confirmation'&&(
-                <div style={{marginTop:12,background:'rgba(255,255,255,.15)',borderRadius:8,padding:'9px 13px',fontSize:13,fontWeight:600}}>
-                  ✓ Payment submitted — tap to review & confirm
-                </div>
-              )}
             </div>
             <div style={{textAlign:'center',flexShrink:0}}>
-              <div style={{background:'rgba(255,255,255,.15)',borderRadius:14,padding:'16px 22px',backdropFilter:'blur(4px)',minWidth:120}}>
-                <div style={{fontSize:38,fontWeight:900,lineHeight:1}}>
-                  {countdown.text.split(' ')[0]}
-                </div>
-                <div style={{fontSize:12,opacity:.85,marginTop:4}}>
-                  {countdown.text.split(' ').slice(1).join(' ')||'day'}
-                </div>
+              <div style={{background:'rgba(255,255,255,.15)',borderRadius:14,padding:'16px 22px',backdropFilter:'blur(4px)',minWidth:110}}>
+                <div style={{fontSize:36,fontWeight:900,lineHeight:1}}>{countdown.text.split(' ')[0]}</div>
+                <div style={{fontSize:12,opacity:.85,marginTop:4}}>{countdown.text.split(' ').slice(1).join(' ')||'day'}</div>
               </div>
             </div>
           </div>
@@ -322,29 +416,18 @@ function Dashboard({rows,totRec,totExp,approved,awaiting,setSec,setSelPay}){
         </div>
       )}
 
-      {/* Pending confirmation banner */}
-      {awaiting>0&&(
-        <div onClick={()=>setSec('requests')} style={{background:'#eff6ff',border:'1.5px solid #bfdbfe',borderRadius:12,padding:'12px 16px',marginBottom:16,cursor:'pointer',display:'flex',alignItems:'center',gap:12}}>
-          <span style={{color:'#2563eb'}}>{I.bell}</span>
-          <div>
-            <div style={{fontWeight:700,color:'#1d4ed8',fontSize:14}}>{awaiting} payment{awaiting>1?'s':''} awaiting your confirmation</div>
-            <div style={{color:'#3b82f6',fontSize:12,marginTop:2}}>Click to review →</div>
-          </div>
-        </div>
-      )}
-
-      {/* Stats row */}
+      {/* STATS */}
       <div style={{display:'flex',flexWrap:'wrap',gap:11,marginBottom:20}}>
         <Stat label="Principal" value={fmtTaka(400000)} sub="Fixed"/>
         <Stat label="Interest / month" value={fmtTaka(14000)} sub="Fixed"/>
-        <Stat label="Total Received" value={fmtTaka(totRec)} sub={`${approved.length} payments`} accent="#15803d"/>
+        <Stat label="Total Received" value={fmtTaka(totRec)} sub={`${paid.length} payments`} accent="#15803d"/>
         <Stat label="Total Pending" value={fmtTaka(totPend)} sub={`${remaining} remaining`} accent="#c2410c"/>
-        <Stat label="Received" value={approved.length} sub={`${lateCount} late · ${missedCount} missed`}/>
+        <Stat label="Received" value={paid.length} sub={`${lateCount} late · ${missedCount} missed`}/>
         <Stat label="Remaining" value={remaining}/>
       </div>
 
-      {/* Summary + recent */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:16}}>
+        {/* Summary */}
         <div style={{background:'#fff',borderRadius:12,padding:20,border:'1px solid #e8edf5',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
           <h3 style={{fontSize:14,fontWeight:700,color:'#0f172a',margin:'0 0 14px'}}>Agreement Summary</h3>
           {[
@@ -364,11 +447,12 @@ function Dashboard({rows,totRec,totExp,approved,awaiting,setSec,setSelPay}){
           ))}
         </div>
 
+        {/* Upcoming */}
         <div style={{background:'#fff',borderRadius:12,padding:20,border:'1px solid #e8edf5',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
           <h3 style={{fontSize:14,fontWeight:700,color:'#0f172a',margin:'0 0 14px'}}>Upcoming Months</h3>
-          {rows.slice(0,7).map(p=>{
-            const isCur=p.year===now.getFullYear()&&p.month===now.getMonth();
-            const cd=(p.cs==='Pending'||p.cs==='Awaiting Confirmation')?countdownInfo(p.dueDate):null;
+          {rows.slice(0,8).map(p=>{
+            const isCur=p.year===new Date().getFullYear()&&p.month===new Date().getMonth();
+            const cd=(p.cs==='Pending')?countdownInfo(p.dueDate):null;
             return(
               <div key={p.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'9px 0',borderBottom:'1px solid #f1f5f9',gap:8}}>
                 <div>
@@ -382,24 +466,77 @@ function Dashboard({rows,totRec,totExp,approved,awaiting,setSec,setSelPay}){
               </div>
             );
           })}
+          {isAdmin&&(
+            <button onClick={()=>setSec('record')} style={{marginTop:14,width:'100%',background:'#2563eb',color:'#fff',border:'none',borderRadius:8,padding:'10px',fontSize:13,fontWeight:700}}>
+              + Record a Payment
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-// ═══ MONTHLY TABLE ══════════════════════════════════════════
-function MonthTable({rows,onReview,onProof}){
+// ═══════════════════════════════════════════════════════════════
+//  MONTHLY TABLE — with inline edit for admin
+// ═══════════════════════════════════════════════════════════════
+function MonthTable({rows,isAdmin,updPayment,onProof,setSec}){
   const now=new Date();
+  const[editId,setEditId]=useState(null);
+  const[form,setForm]=useState({});
+  const[pf,setPf]=useState(null);
+  const[err,setErr]=useState('');
+  const fRef=useRef();
+
+  const startEdit=(p)=>{
+    setEditId(p.id);
+    setErr('');
+    setPf(null);
+    if(p.payment){
+      setForm({paymentDate:p.payment.paymentDate,paidAmount:String(p.payment.paidAmount),note:p.payment.note||''});
+    } else {
+      setForm({paymentDate:todayStr(),paidAmount:String(AGR.interest),note:''});
+    }
+  };
+
+  const cancelEdit=()=>{setEditId(null);setErr('');setPf(null);};
+
+  const onFile=e=>{
+    const f=e.target.files[0];if(!f)return;
+    if(!['image/jpeg','image/jpg','image/png','application/pdf'].includes(f.type)){setErr('Only JPG, PNG, or PDF.');return;}
+    if(f.size>5*1024*1024){setErr('Max 5 MB.');return;}
+    const r=new FileReader();
+    r.onload=ev=>{setPf({name:f.name,type:f.type,dataUrl:ev.target.result});setErr('');};
+    r.readAsDataURL(f);
+  };
+
+  const saveEdit=(p)=>{
+    setErr('');
+    if(!form.paymentDate){setErr('Enter payment date.');return;}
+    const amt=Number(form.paidAmount);
+    if(!amt||amt<=0){setErr('Enter valid amount.');return;}
+    const existingProof=p.payment?.proof||null;
+    updPayment(p.id,px=>({...px,payment:{paymentDate:form.paymentDate,paidAmount:amt,note:form.note,proof:pf||existingProof,recordedAt:new Date().toISOString()}}));
+    cancelEdit();
+  };
+
+  const deletePayment=(id)=>{
+    if(!window.confirm('Remove this payment record?'))return;
+    updPayment(id,p=>({...p,payment:null}));
+  };
+
   return(
     <div>
-      <h2 style={{fontSize:18,fontWeight:800,color:'#0f172a',marginBottom:18}}>Monthly Payments</h2>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18,flexWrap:'wrap',gap:10}}>
+        <h2 style={{fontSize:18,fontWeight:800,color:'#0f172a',margin:0}}>Monthly Payments</h2>
+        {isAdmin&&<button onClick={()=>setSec('record')} style={{background:'#2563eb',color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontSize:13,fontWeight:700}}>+ Record Payment</button>}
+      </div>
       <div style={{background:'#fff',borderRadius:12,border:'1px solid #e8edf5',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
         <div style={{overflowX:'auto'}}>
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
             <thead>
               <tr style={{background:'#f8faff'}}>
-                {['Month','Due Date','Amount','Payment Date','Status','Proof','Action'].map(h=>(
+                {['Month','Due Date','Amount','Payment Date','Status','Proof',isAdmin?'Actions':''].map(h=>(
                   <th key={h} style={{padding:'11px 13px',textAlign:'left',color:'#8898b3',fontWeight:700,fontSize:10,textTransform:'uppercase',letterSpacing:'.5px',whiteSpace:'nowrap'}}>{h}</th>
                 ))}
               </tr>
@@ -407,7 +544,48 @@ function MonthTable({rows,onReview,onProof}){
             <tbody>
               {rows.map((p,i)=>{
                 const cur=p.year===now.getFullYear()&&p.month===now.getMonth();
-                const cd=(p.cs==='Pending'||p.cs==='Awaiting Confirmation')?countdownInfo(p.dueDate):null;
+                const cd=p.cs==='Pending'?countdownInfo(p.dueDate):null;
+                const isEditing=editId===p.id;
+
+                if(isEditing&&isAdmin)return(
+                  <tr key={p.id} style={{background:'#f0f6ff',borderTop:'2px solid #2563eb'}}>
+                    <td colSpan={7} style={{padding:'16px 14px'}}>
+                      <div style={{fontWeight:700,color:'#2563eb',fontSize:13,marginBottom:12}}>✏ Editing: {monthLabel(p.year,p.month)}</div>
+                      {err&&<div style={{background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:7,padding:'8px 12px',fontSize:12,marginBottom:10}}>{err}</div>}
+                      <div style={{display:'flex',flexWrap:'wrap',gap:12,alignItems:'flex-end'}}>
+                        <div style={{flex:'1 1 140px'}}>
+                          <div style={{fontSize:11,fontWeight:700,color:'#374151',marginBottom:4}}>Payment Date</div>
+                          <input type="date" value={form.paymentDate} onChange={e=>setForm({...form,paymentDate:e.target.value})}
+                            style={{width:'100%',border:'1.5px solid #c7d2e1',borderRadius:7,padding:'8px 10px',fontSize:13,outline:'none',color:'#0f172a'}}/>
+                        </div>
+                        <div style={{flex:'1 1 120px'}}>
+                          <div style={{fontSize:11,fontWeight:700,color:'#374151',marginBottom:4}}>Amount (৳)</div>
+                          <input type="number" value={form.paidAmount} onChange={e=>setForm({...form,paidAmount:e.target.value})}
+                            style={{width:'100%',border:'1.5px solid #c7d2e1',borderRadius:7,padding:'8px 10px',fontSize:13,outline:'none',color:'#0f172a'}}/>
+                        </div>
+                        <div style={{flex:'1 1 160px'}}>
+                          <div style={{fontSize:11,fontWeight:700,color:'#374151',marginBottom:4}}>Note (optional)</div>
+                          <input value={form.note} onChange={e=>setForm({...form,note:e.target.value})} placeholder="Optional note…"
+                            style={{width:'100%',border:'1.5px solid #c7d2e1',borderRadius:7,padding:'8px 10px',fontSize:13,outline:'none',color:'#0f172a'}}/>
+                        </div>
+                        <div style={{flex:'1 1 160px'}}>
+                          <div style={{fontSize:11,fontWeight:700,color:'#374151',marginBottom:4}}>
+                            Proof {p.payment?.proof&&!pf?'(current kept)':'(JPG/PNG/PDF)'}
+                          </div>
+                          <div onClick={()=>fRef.current.click()} style={{border:'1.5px dashed #93c5fd',borderRadius:7,padding:'8px 12px',cursor:'pointer',background:'#f8faff',fontSize:12,color:pf?'#15803d':'#374151',fontWeight:pf?700:400}}>
+                            {pf?`✓ ${pf.name}`:p.payment?.proof?'Click to replace proof':'Click to upload'}
+                          </div>
+                          <input ref={fRef} type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={onFile} style={{display:'none'}}/>
+                        </div>
+                        <div style={{display:'flex',gap:8}}>
+                          <button onClick={()=>saveEdit(p)} style={{background:'#16a34a',color:'#fff',border:'none',borderRadius:7,padding:'9px 16px',fontSize:13,fontWeight:700,whiteSpace:'nowrap'}}>Save</button>
+                          <button onClick={cancelEdit} style={{background:'#f1f5f9',color:'#374151',border:'none',borderRadius:7,padding:'9px 14px',fontSize:13,fontWeight:600}}>Cancel</button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                );
+
                 return(
                   <tr key={p.id} style={{background:cur?'#eff6ff':i%2===0?'#fff':'#fafbff',borderTop:'1px solid #f1f5f9'}}>
                     <td style={{padding:'10px 13px',whiteSpace:'nowrap'}}>
@@ -419,18 +597,27 @@ function MonthTable({rows,onReview,onProof}){
                     </td>
                     <td style={{padding:'10px 13px',color:'#475569',whiteSpace:'nowrap'}}>{fmtDate(p.dueDate)}</td>
                     <td style={{padding:'10px 13px',fontWeight:700,color:'#0f172a'}}>{fmtTaka(p.expectedAmount)}</td>
-                    <td style={{padding:'10px 13px',color:'#475569',whiteSpace:'nowrap'}}>{p.submission?.paymentDate?fmtDate(p.submission.paymentDate):'—'}</td>
+                    <td style={{padding:'10px 13px',color:'#475569',whiteSpace:'nowrap'}}>{p.payment?.paymentDate?fmtDate(p.payment.paymentDate):'—'}</td>
                     <td style={{padding:'10px 13px'}}><Badge s={p.cs}/></td>
                     <td style={{padding:'10px 13px'}}>
-                      {p.submission?.proof
-                        ?<button onClick={()=>onProof(p.submission.proof)} style={{background:'none',border:'1px solid #e2e8f0',borderRadius:6,padding:'4px 9px',color:'#2563eb',fontSize:12,display:'flex',alignItems:'center',gap:4}}>{I.eye}View</button>
+                      {p.payment?.proof
+                        ?<button onClick={()=>onProof(p.payment.proof)} style={{background:'none',border:'1px solid #e2e8f0',borderRadius:6,padding:'4px 9px',color:'#2563eb',fontSize:12,display:'flex',alignItems:'center',gap:4}}>{I.eye}View</button>
                         :'—'}
                     </td>
-                    <td style={{padding:'10px 13px'}}>
-                      {p.submission?.status==='pending'&&(
-                        <button onClick={()=>onReview(p)} style={{background:'#2563eb',color:'#fff',border:'none',borderRadius:6,padding:'5px 11px',fontSize:12,fontWeight:700}}>Review</button>
-                      )}
-                    </td>
+                    {isAdmin&&(
+                      <td style={{padding:'10px 13px'}}>
+                        <div style={{display:'flex',gap:6}}>
+                          <button onClick={()=>startEdit(p)} style={{background:'#f0f6ff',color:'#2563eb',border:'1px solid #bfdbfe',borderRadius:6,padding:'5px 10px',fontSize:12,fontWeight:700,display:'flex',alignItems:'center',gap:4}}>
+                            {I.edit}{p.payment?'Edit':'Add'}
+                          </button>
+                          {p.payment&&(
+                            <button onClick={()=>deletePayment(p.id)} style={{background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:6,padding:'5px 9px',fontSize:12,display:'flex',alignItems:'center',gap:3}}>
+                              {I.trash}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -442,84 +629,12 @@ function MonthTable({rows,onReview,onProof}){
   );
 }
 
-// ═══ REQUESTS ═══════════════════════════════════════════════
-function Requests({rows,sel,onSel,onApprove,onProof}){
-  const pending=rows.filter(p=>p.submission&&p.submission.status==='pending');
-  return(
-    <div>
-      <h2 style={{fontSize:18,fontWeight:800,color:'#0f172a',marginBottom:18}}>Payment Requests</h2>
-      {pending.length===0&&!sel&&(
-        <div style={{textAlign:'center',padding:48,color:'#94a3b8'}}>
-          <div style={{fontSize:38,marginBottom:10}}>✓</div>
-          <div style={{fontWeight:700,fontSize:15,color:'#64748b'}}>No pending requests</div>
-          <div style={{fontSize:13,marginTop:4}}>All caught up.</div>
-        </div>
-      )}
-      <div style={{display:'flex',flexDirection:'column',gap:12}}>
-        {pending.map(p=>(
-          <div key={p.id} onClick={()=>onSel(p)}
-            style={{background:'#fff',border:sel?.id===p.id?'2px solid #2563eb':'1px solid #e8edf5',borderRadius:12,padding:18,cursor:'pointer',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:8}}>
-              <div>
-                <div style={{fontWeight:700,fontSize:15,color:'#0f172a'}}>{monthLabel(p.year,p.month)}</div>
-                <div style={{color:'#64748b',fontSize:12,marginTop:3}}>Submitted · {fmtDate(p.submission.submittedAt)}</div>
-              </div>
-              <Badge s="Awaiting Confirmation"/>
-            </div>
-            <div style={{display:'flex',gap:18,marginTop:12,flexWrap:'wrap'}}>
-              <div><span style={{color:'#64748b',fontSize:11}}>Expected</span><div style={{fontWeight:700,color:'#0f172a'}}>{fmtTaka(p.expectedAmount)}</div></div>
-              <div><span style={{color:'#64748b',fontSize:11}}>Paid</span><div style={{fontWeight:700,color:p.submission.paidAmount>=p.expectedAmount?'#15803d':'#dc2626'}}>{fmtTaka(p.submission.paidAmount)}</div></div>
-              <div><span style={{color:'#64748b',fontSize:11}}>Payment Date</span><div style={{fontWeight:600,color:'#0f172a'}}>{fmtDate(p.submission.paymentDate)}</div></div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {sel&&sel.submission&&(
-        <div style={{background:'#fff',borderRadius:12,border:'1px solid #e8edf5',padding:22,marginTop:16,boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
-            <h3 style={{margin:0,fontSize:16,fontWeight:700,color:'#0f172a'}}>Review: {monthLabel(sel.year,sel.month)}</h3>
-            <button onClick={()=>onSel(null)} style={{background:'#f1f5f9',border:'none',borderRadius:6,padding:'5px 9px',color:'#64748b',fontSize:16}}>✕</button>
-          </div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:11,marginBottom:18}}>
-            {[['Expected',fmtTaka(sel.expectedAmount)],['Amount Paid',fmtTaka(sel.submission.paidAmount)],['Payment Date',fmtDate(sel.submission.paymentDate)],['Due Date',fmtDate(sel.dueDate)],['Submitted',fmtDate(sel.submission.submittedAt)]].map(([k,v])=>(
-              <div key={k} style={{background:'#f8faff',borderRadius:8,padding:'11px 13px'}}>
-                <div style={{fontSize:10,color:'#8898b3',fontWeight:700,textTransform:'uppercase',letterSpacing:'.4px'}}>{k}</div>
-                <div style={{fontSize:14,fontWeight:800,color:'#0f172a',marginTop:3}}>{v}</div>
-              </div>
-            ))}
-          </div>
-          {sel.submission.proof&&(
-            <div style={{marginBottom:18}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#8898b3',textTransform:'uppercase',letterSpacing:'.4px',marginBottom:8}}>Payment Proof</div>
-              <ProofThumb proof={sel.submission.proof}/>
-              <button onClick={()=>onProof(sel.submission.proof)} style={{marginTop:8,background:'none',border:'1px solid #e2e8f0',borderRadius:6,padding:'5px 12px',color:'#2563eb',fontSize:12,display:'inline-flex',alignItems:'center',gap:4}}>{I.eye} View Full</button>
-            </div>
-          )}
-          {sel.submission.note&&(
-            <div style={{background:'#f8faff',borderRadius:8,padding:'11px 13px',marginBottom:18}}>
-              <div style={{fontSize:10,color:'#8898b3',fontWeight:700,textTransform:'uppercase',letterSpacing:'.4px'}}>Note</div>
-              <div style={{fontSize:13,color:'#0f172a',marginTop:4}}>{sel.submission.note}</div>
-            </div>
-          )}
-          <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-            <button onClick={()=>onApprove(sel.id,true)} style={{flex:1,minWidth:140,background:'#16a34a',color:'#fff',border:'none',borderRadius:8,padding:11,fontSize:14,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
-              {I.chk} Accept Payment
-            </button>
-            <button onClick={()=>onApprove(sel.id,false)} style={{flex:1,minWidth:140,background:'#dc2626',color:'#fff',border:'none',borderRadius:8,padding:11,fontSize:14,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
-              {I.x} Reject Payment
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══ HISTORY ════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  HISTORY
+// ═══════════════════════════════════════════════════════════════
 function History({rows,onProof}){
   const[filter,setFilter]=useState('All');
-  const filters=['All','Received in time','Received late','Pending','Missed','Awaiting Confirmation','Rejected'];
+  const filters=['All','Received in time','Received late','Pending','Missed'];
   const shown=filter==='All'?rows:rows.filter(p=>p.cs===filter);
   return(
     <div>
@@ -537,7 +652,7 @@ function History({rows,onProof}){
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
             <thead>
               <tr style={{background:'#f8faff'}}>
-                {['Month','Amount','Payment Date','Status','Proof','Confirmed'].map(h=>(
+                {['Month','Amount Paid','Payment Date','Status','Proof','Recorded At'].map(h=>(
                   <th key={h} style={{padding:'11px 13px',textAlign:'left',color:'#8898b3',fontWeight:700,fontSize:10,textTransform:'uppercase',letterSpacing:'.5px',whiteSpace:'nowrap'}}>{h}</th>
                 ))}
               </tr>
@@ -548,15 +663,15 @@ function History({rows,onProof}){
                 :shown.map((p,i)=>(
                   <tr key={p.id} style={{background:i%2===0?'#fff':'#fafbff',borderTop:'1px solid #f1f5f9'}}>
                     <td style={{padding:'10px 13px',fontWeight:600,color:'#0f172a',whiteSpace:'nowrap'}}>{monthLabel(p.year,p.month)}</td>
-                    <td style={{padding:'10px 13px',fontWeight:700,color:'#0f172a'}}>{p.submission?fmtTaka(p.submission.paidAmount):fmtTaka(p.expectedAmount)}</td>
-                    <td style={{padding:'10px 13px',color:'#475569',whiteSpace:'nowrap'}}>{p.submission?.paymentDate?fmtDate(p.submission.paymentDate):'—'}</td>
+                    <td style={{padding:'10px 13px',fontWeight:700,color:'#0f172a'}}>{p.payment?fmtTaka(p.payment.paidAmount):'—'}</td>
+                    <td style={{padding:'10px 13px',color:'#475569',whiteSpace:'nowrap'}}>{p.payment?.paymentDate?fmtDate(p.payment.paymentDate):'—'}</td>
                     <td style={{padding:'10px 13px'}}><Badge s={p.cs}/></td>
                     <td style={{padding:'10px 13px'}}>
-                      {p.submission?.proof
-                        ?<button onClick={()=>onProof(p.submission.proof)} style={{background:'none',border:'1px solid #e2e8f0',borderRadius:6,padding:'4px 9px',color:'#2563eb',fontSize:12}}>View</button>
+                      {p.payment?.proof
+                        ?<button onClick={()=>onProof(p.payment.proof)} style={{background:'none',border:'1px solid #e2e8f0',borderRadius:6,padding:'4px 9px',color:'#2563eb',fontSize:12}}>View</button>
                         :'—'}
                     </td>
-                    <td style={{padding:'10px 13px',color:'#475569',fontSize:12,whiteSpace:'nowrap'}}>{p.submission?.confirmedAt?fmtDate(p.submission.confirmedAt):'—'}</td>
+                    <td style={{padding:'10px 13px',color:'#475569',fontSize:12,whiteSpace:'nowrap'}}>{p.payment?.recordedAt?fmtDate(p.payment.recordedAt):'—'}</td>
                   </tr>
                 ))
               }
@@ -568,15 +683,21 @@ function History({rows,onProof}){
   );
 }
 
-// ═══ RECORD PAYMENT ═════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  RECORD PAYMENT (admin quick-entry form)
+// ═══════════════════════════════════════════════════════════════
 function RecordPayment({rows,updPayment,setSec}){
   const now=new Date();
-  const eligible=rows.filter(p=>{const s=p.cs;return s==='Pending'||s==='Rejected';});
-  const[selId,setSelId]=useState(()=>{const c=eligible.find(p=>p.year===now.getFullYear()&&p.month===now.getMonth());return c?.id||eligible[0]?.id||'';});
+  const unrecorded=rows.filter(p=>!p.payment);
+  const[selId,setSelId]=useState(()=>{
+    const c=unrecorded.find(p=>p.year===now.getFullYear()&&p.month===now.getMonth());
+    return c?.id||unrecorded[0]?.id||'';
+  });
   const[form,setForm]=useState({paymentDate:todayStr(),paidAmount:'14000',note:''});
   const[pf,setPf]=useState(null);
   const[err,setErr]=useState('');
   const[ok,setOk]=useState(false);
+  const fRef=useRef();
 
   const sel=rows.find(p=>p.id===selId);
 
@@ -595,8 +716,7 @@ function RecordPayment({rows,updPayment,setSec}){
     if(!form.paymentDate){setErr('Enter payment date.');return;}
     const amt=Number(form.paidAmount);
     if(!amt||amt<=0){setErr('Enter a valid amount.');return;}
-    if(!pf){setErr('Upload payment proof.');return;}
-    updPayment(selId,p=>({...p,submission:{paymentDate:form.paymentDate,paidAmount:amt,note:form.note,proof:pf,submittedAt:new Date().toISOString(),status:'pending'}}));
+    updPayment(selId,p=>({...p,payment:{paymentDate:form.paymentDate,paidAmount:amt,note:form.note,proof:pf,recordedAt:new Date().toISOString()}}));
     setOk(true);
   };
 
@@ -604,46 +724,54 @@ function RecordPayment({rows,updPayment,setSec}){
     <div style={{maxWidth:460,textAlign:'center',margin:'0 auto',paddingTop:40}}>
       <div style={{fontSize:54,marginBottom:14}}>✅</div>
       <h3 style={{fontSize:19,fontWeight:800,color:'#0f172a',margin:'0 0 8px'}}>Payment Recorded</h3>
-      <p style={{color:'#64748b',fontSize:14}}>Go to Payment Requests to approve it.</p>
-      <button onClick={()=>{setOk(false);setSec('requests');}} style={{background:'#2563eb',color:'#fff',border:'none',borderRadius:8,padding:'10px 22px',fontSize:14,fontWeight:700,marginTop:16}}>Review Now</button>
+      <p style={{color:'#64748b',fontSize:14}}>The record is saved and visible to everyone.</p>
+      <div style={{display:'flex',gap:10,justifyContent:'center',marginTop:16}}>
+        <button onClick={()=>{setOk(false);setSec('payments');}} style={{background:'#2563eb',color:'#fff',border:'none',borderRadius:8,padding:'10px 20px',fontSize:14,fontWeight:700}}>View Payments</button>
+        <button onClick={()=>{setOk(false);setForm({paymentDate:todayStr(),paidAmount:'14000',note:''});setPf(null);}} style={{background:'#f1f5f9',color:'#374151',border:'none',borderRadius:8,padding:'10px 20px',fontSize:14,fontWeight:600}}>Record Another</button>
+      </div>
     </div>
   );
 
   return(
     <div style={{maxWidth:500}}>
       <h2 style={{fontSize:18,fontWeight:800,color:'#0f172a',marginBottom:6}}>Record Payment</h2>
-      <p style={{color:'#64748b',fontSize:13,marginBottom:18}}>Record a payment received from Shammi.</p>
-      {eligible.length===0
-        ?<div style={{background:'#f0fdf4',borderRadius:12,padding:24,textAlign:'center',color:'#15803d',fontWeight:600,border:'1px solid #86efac'}}>All payments submitted or confirmed.</div>
+      <p style={{color:'#64748b',fontSize:13,marginBottom:18}}>Mark a payment as received. This is immediately visible to Shammi.</p>
+      {unrecorded.length===0
+        ?<div style={{background:'#f0fdf4',borderRadius:12,padding:24,textAlign:'center',color:'#15803d',fontWeight:600,border:'1px solid #86efac'}}>All payments have been recorded. Use Monthly Payments to edit any record.</div>
         :<div style={{background:'#fff',borderRadius:12,border:'1px solid #e8edf5',padding:22,boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
           {err&&<div style={{background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:8,padding:'9px 13px',fontSize:13,marginBottom:14}}>{err}</div>}
+
           <div style={{marginBottom:14}}>
             <label style={{fontSize:12,fontWeight:700,color:'#374151',display:'block',marginBottom:5}}>Payment Month</label>
             <select value={selId} onChange={e=>setSelId(e.target.value)}
               style={{width:'100%',border:'1.5px solid #e2e8f0',borderRadius:8,padding:'10px 12px',fontSize:13,background:'#fff',outline:'none',color:'#0f172a'}}>
               <option value="">Select month…</option>
-              {eligible.map(p=><option key={p.id} value={p.id}>{monthLabel(p.year,p.month)} — {fmtTaka(p.expectedAmount)}</option>)}
+              {unrecorded.map(p=><option key={p.id} value={p.id}>{monthLabel(p.year,p.month)} — {fmtTaka(p.expectedAmount)}</option>)}
             </select>
           </div>
+
           {sel&&(
             <div style={{background:'#f8faff',borderRadius:8,padding:'9px 13px',marginBottom:14,display:'flex',gap:16,flexWrap:'wrap'}}>
               <div><div style={{fontSize:10,color:'#8898b3',fontWeight:700,textTransform:'uppercase'}}>Amount Due</div><div style={{fontWeight:700,color:'#0f172a'}}>{fmtTaka(sel.expectedAmount)}</div></div>
               <div><div style={{fontSize:10,color:'#8898b3',fontWeight:700,textTransform:'uppercase'}}>Due Date</div><div style={{fontWeight:700,color:'#0f172a'}}>{fmtDate(sel.dueDate)}</div></div>
             </div>
           )}
+
           <div style={{marginBottom:14}}>
             <label style={{fontSize:12,fontWeight:700,color:'#374151',display:'block',marginBottom:5}}>Payment Date</label>
             <input type="date" value={form.paymentDate} onChange={e=>setForm({...form,paymentDate:e.target.value})}
               style={{width:'100%',border:'1.5px solid #e2e8f0',borderRadius:8,padding:'10px 12px',fontSize:13,outline:'none',color:'#0f172a'}}/>
           </div>
+
           <div style={{marginBottom:14}}>
             <label style={{fontSize:12,fontWeight:700,color:'#374151',display:'block',marginBottom:5}}>Amount Paid (৳)</label>
             <input type="number" value={form.paidAmount} onChange={e=>setForm({...form,paidAmount:e.target.value})}
               style={{width:'100%',border:'1.5px solid #e2e8f0',borderRadius:8,padding:'10px 12px',fontSize:13,outline:'none',color:'#0f172a'}}/>
           </div>
+
           <div style={{marginBottom:14}}>
-            <label style={{fontSize:12,fontWeight:700,color:'#374151',display:'block',marginBottom:5}}>Payment Proof (JPG, PNG, PDF)</label>
-            <div onClick={()=>document.getElementById('pf-upload').click()} style={{border:'2px dashed #bfdbfe',borderRadius:10,padding:22,textAlign:'center',cursor:'pointer',background:'#f8faff'}}>
+            <label style={{fontSize:12,fontWeight:700,color:'#374151',display:'block',marginBottom:5}}>Payment Proof — optional (JPG, PNG, PDF)</label>
+            <div onClick={()=>fRef.current.click()} style={{border:'2px dashed #bfdbfe',borderRadius:10,padding:22,textAlign:'center',cursor:'pointer',background:'#f8faff'}}>
               {pf
                 ?<div style={{color:'#15803d',fontWeight:700,fontSize:13}}>✓ {pf.name}</div>
                 :<div>
@@ -653,15 +781,17 @@ function RecordPayment({rows,updPayment,setSec}){
                 </div>
               }
             </div>
-            <input id="pf-upload" type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={onFile} style={{display:'none'}}/>
+            <input ref={fRef} type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={onFile} style={{display:'none'}}/>
           </div>
+
           <div style={{marginBottom:18}}>
             <label style={{fontSize:12,fontWeight:700,color:'#374151',display:'block',marginBottom:5}}>Note (optional)</label>
             <textarea value={form.note} onChange={e=>setForm({...form,note:e.target.value})} rows={2} placeholder="Any notes…"
               style={{width:'100%',border:'1.5px solid #e2e8f0',borderRadius:8,padding:'9px 12px',fontSize:13,resize:'vertical',outline:'none',color:'#0f172a'}}/>
           </div>
+
           <button onClick={submit} style={{width:'100%',background:'#2563eb',color:'#fff',border:'none',borderRadius:8,padding:12,fontSize:15,fontWeight:700}}>
-            Record Payment
+            Save Payment Record
           </button>
         </div>
       }
@@ -669,7 +799,9 @@ function RecordPayment({rows,updPayment,setSec}){
   );
 }
 
-// ═══ AGREEMENT DETAILS ══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  AGREEMENT DETAILS
+// ═══════════════════════════════════════════════════════════════
 function AgrDetail({totalMonths}){
   return(
     <div>
@@ -689,9 +821,8 @@ function AgrDetail({totalMonths}){
           {[
             {s:'Received in time',rule:'Payment date ≤ 15th of month'},
             {s:'Received late',rule:'Payment date > 15th of month'},
-            {s:'Awaiting Confirmation',rule:'Recorded, not yet approved'},
             {s:'Pending',rule:'No record; deadline not passed'},
-            {s:'Missed',rule:'Month ended with no approved payment'},
+            {s:'Missed',rule:'Month ended with no recorded payment'},
           ].map(item=>(
             <div key={item.s} style={{display:'flex',gap:10,alignItems:'center',marginBottom:10,flexWrap:'wrap'}}>
               <Badge s={item.s}/><span style={{color:'#64748b',fontSize:13}}>{item.rule}</span>
@@ -713,8 +844,10 @@ function AgrDetail({totalMonths}){
   );
 }
 
-// ═══ BANK DETAILS ═══════════════════════════════════════════
-function BankSection({bank,onSave}){
+// ═══════════════════════════════════════════════════════════════
+//  BANK DETAILS
+// ═══════════════════════════════════════════════════════════════
+function BankSection({bank,isAdmin,onSave}){
   const[editing,setEditing]=useState(false);
   const[form,setForm]=useState({...bank});
   useEffect(()=>{setForm({...bank});},[bank]);
@@ -731,7 +864,7 @@ function BankSection({bank,onSave}){
     <div>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
         <h2 style={{fontSize:18,fontWeight:800,color:'#0f172a',margin:0}}>Bank Account Details</h2>
-        {!editing&&(
+        {isAdmin&&!editing&&(
           <button onClick={()=>setEditing(true)} style={{display:'flex',alignItems:'center',gap:6,background:'#2563eb',color:'#fff',border:'none',borderRadius:8,padding:'8px 15px',fontSize:13,fontWeight:700}}>
             {I.edit} Edit
           </button>
@@ -746,12 +879,15 @@ function BankSection({bank,onSave}){
           </div>
         </div>
         {!editing
-          ?fields.map(({k,l})=>(
-            <div key={k} style={{display:'flex',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid #f1f5f9',gap:12}}>
-              <span style={{color:'#64748b',fontSize:13,minWidth:140,flexShrink:0}}>{l}</span>
-              <span style={{color:'#0f172a',fontSize:13,fontWeight:700,textAlign:'right',wordBreak:'break-all'}}>{bank[k]||'—'}</span>
-            </div>
-          ))
+          ?<div>
+            {fields.map(({k,l})=>(
+              <div key={k} style={{display:'flex',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid #f1f5f9',gap:12}}>
+                <span style={{color:'#64748b',fontSize:13,minWidth:140,flexShrink:0}}>{l}</span>
+                <span style={{color:'#0f172a',fontSize:13,fontWeight:700,textAlign:'right',wordBreak:'break-all'}}>{bank[k]||'—'}</span>
+              </div>
+            ))}
+            {!isAdmin&&<p style={{fontSize:12,color:'#94a3b8',marginTop:14,display:'flex',alignItems:'center',gap:5}}>{I.lock} Only Rahad (Tazwaar) can update bank details.</p>}
+          </div>
           :<div>
             {fields.map(({k,l,multi})=>(
               <div key={k} style={{marginBottom:13}}>
